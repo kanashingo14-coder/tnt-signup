@@ -49,6 +49,10 @@
   .notice a{color:var(--orange-dark);font-weight:700;word-break:break-all;}
   .link-green{color:var(--line);font-weight:700;text-decoration:underline;}
   .link-blue{color:#2f6fda;font-weight:700;text-decoration:underline;}
+  .notice a.link-green{color:var(--line);}
+  .notice a.link-blue{color:#2f6fda;}
+  .dow-red{color:#e5484d;}
+  .dow-blue{color:#2f6fda;}
   h2.section-title{font-size:16px;color:var(--orange-dark);border-left:6px solid var(--orange);padding-left:10px;margin:30px 0 14px;}
   .event-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
   .event-info{flex:1;min-width:200px;}
@@ -117,10 +121,15 @@ const DOW = ["日","月","火","水","木","金","土"];
 function esc(s){
   return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
-function fmtDateJp(dateStr){
+function fmtDateJp(dateStr, isHoliday){
   const [y,m,d] = dateStr.split("-").map(Number);
-  const dow = DOW[new Date(Date.UTC(y, m-1, d)).getUTCDay()];
-  return `${m}/${d}(${dow})`;
+  const dowIdx = new Date(Date.UTC(y, m-1, d)).getUTCDay();
+  const dow = DOW[dowIdx];
+  let cls = "";
+  if (isHoliday || dowIdx === 0) cls = "dow-red";
+  else if (dowIdx === 6) cls = "dow-blue";
+  const dowHtml = cls ? `<span class="${cls}">${dow}</span>` : dow;
+  return `${m}/${d}(${dowHtml})`;
 }
 function hm(t){ return (t||"").slice(0,5); }
 function subtractMinutes(t, mins){
@@ -152,7 +161,7 @@ function eventDetailText(ev, gatherTime){
     <h3 class="detail-heading">📋 詳細</h3>
     <dl class="detail-list">
       <dt>🍀 日時</dt>
-      <dd>${fmtDateJp(ev.event_date)} ${hm(ev.start_time)}-${hm(ev.end_time)}<span class="sub">集合：${gatherTime}</span></dd>
+      <dd>${fmtDateJp(ev.event_date, ev.is_holiday)} ${hm(ev.start_time)}-${hm(ev.end_time)}<span class="sub">集合：${gatherTime}</span></dd>
       <dt>🍀 場所</dt>
       <dd>${esc(ev.venue_name)}　${mapLink}<span class="sub">🚃 ${esc(ev.nearest_station)}</span></dd>
       <dt>🍀 参加費</dt>
@@ -204,7 +213,7 @@ async function renderHome(app){
       <div>${badge}</div>
       <div class="event-row">
         <div class="event-info">
-          <div class="event-date">${fmtDateJp(ev.event_date)} ${hm(ev.start_time)}〜${hm(ev.end_time)}</div>
+          <div class="event-date">${fmtDateJp(ev.event_date, ev.is_holiday)} ${hm(ev.start_time)}〜${hm(ev.end_time)}</div>
           <div class="event-meta">📍 ${esc(ev.venue_name)}</div>
           <div class="event-meta">👥 参加状況：${ev.confirmed_count} / ${ev.capacity}</div>
         </div>
