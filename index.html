@@ -94,6 +94,13 @@
   .done-icon{font-size:48px;text-align:center;margin:18px 0 6px;}
   .back-link{display:block;text-align:center;margin-top:18px;color:var(--muted);font-size:13px;text-decoration:none;}
   .small-note{font-size:12px;color:var(--muted);margin-top:14px;}
+  .line-link-box{margin-top:16px;padding:12px 14px;border-radius:12px;background:#eefaf1;border:1px solid #bfe8cc;font-size:13px;}
+  .line-link-box.pending{background:#fff3e0;border-color:#ffd9ae;}
+  .line-link-btn{display:inline-block;margin-top:8px;background:var(--line);color:#fff;font-weight:700;font-size:13px;padding:9px 16px;border-radius:999px;border:none;cursor:pointer;text-decoration:none;}
+  .applied-badge{display:inline-block;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px;margin-top:6px;}
+  .applied-badge.signup{background:#eefaf1;color:#1a8f4f;}
+  .applied-badge.waitlist{background:var(--waitlist-soft);color:var(--waitlist-dark);}
+  .applied-badge.maybe{background:#eee9e4;color:var(--ended-text);}
 </style>
 </head>
 <body>
@@ -112,11 +119,40 @@
   </footer>
 </div>
 
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
 const SUPABASE_URL = "https://blyjdnsdsnjfqicqkivx.supabase.co";
 const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJseWpkbnNkc25qZnFpY3FraXZ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0NTMxNDcsImV4cCI6MjEwMTAyOTE0N30.ZQbVEbOrE5Cp3hvMLG6wghkUyWxw2fkIPxC1x3TDFi4";
 const LINE_URL = "https://line.me/R/ti/p/@087leaew?ts=02110704&oat_content=url";
+const LIFF_ID = "2011071073-o2AntqDw";
 const DOW = ["日","月","火","水","木","金","土"];
+
+let lineUserId = null;
+let liffReady = false;
+
+async function initLiff(){
+  try {
+    if (!window.liff) return;
+    await liff.init({ liffId: LIFF_ID });
+    liffReady = true;
+    if (liff.isLoggedIn()) {
+      const profile = await liff.getProfile();
+      lineUserId = profile.userId;
+    }
+  } catch (e) {
+    console.warn("LIFF init failed", e);
+  }
+}
+const liffInitPromise = initLiff();
+
+function lineLinkBoxHtml(){
+  if (lineUserId) {
+    return `<div class="line-link-box">✅ LINE連携済み：開催前日に自動リマインドが届きます</div>`;
+  }
+  return `<div class="line-link-box pending">🔔 LINEでログインすると、開催前日に自動リマインドが届きます（任意）<br>
+    <button type="button" id="lineLoginBtn" class="line-link-btn">LINEでログインする</button>
+  </div>`;
+}
 
 function esc(s){
   return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -190,8 +226,55 @@ function parseHash(){
   return { view: "home" };
 }
 
+function getMyEntriesMap(){
+  try {
+    const raw = localStorage.getItem("tnt_my_entries");
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function setMyEntriesMap(map){
+  try { localStorage.setItem("tnt_my_entries", JSON.stringify(map)); } catch (e) {}
+}
+
+async function getAppliedTypeMap(){
+  // サーバー側（LINE userId）でわかる範囲を優先し、この端末のlocalStorage記録で補う
+  const map = {};
+  if (lineUserId) {
+    const { ok, data } = await rpc("get_my_entries", { p_line_user_id: lineUserId });
+    if (ok && Array.isArray(data)) {
+      const serverMap = {};
+      data.forEach(row => { serverMap[row.event_id] = row.type; });
+      setMyEntriesMap(serverMap); // 次回LINE未連携時のフォールバック用にも保存
+      Object.assign(map, serverMap);
+    }
+  }
+  const localMap = getMyEntriesMap();
+  Object.keys(localMap).forEach(id => { if (!(id in map)) map[id] = "maybe"; });
+  // localStorageの申込フラグ（申込直後にこの端末で立てたもの）も拾う
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.indexOf("tnt_applied_") === 0) {
+        const id = key.slice("tnt_applied_".length);
+        if (!(id in map)) map[id] = "maybe";
+      }
+    }
+  } catch (e) {}
+  return map;
+}
+
+function appliedBadgeHtml(type){
+  if (type === "signup") return `<div class="applied-badge signup">✅ 申込済み</div>`;
+  if (type === "waitlist") return `<div class="applied-badge waitlist">⏳ キャンセル待ち中</div>`;
+  if (type === "maybe") return `<div class="applied-badge maybe">✅ 申込済みの可能性があります（この端末）</div>`;
+  return "";
+}
+
 async function renderHome(app){
-  const { ok, data } = await rpc("get_home_events", {});
+  const [{ ok, data }, appliedMap] = await Promise.all([
+    rpc("get_home_events", {}),
+    getAppliedTypeMap(),
+  ]);
   if (!ok) {
     app.innerHTML = `<div class="card">読み込みに失敗しました。時間をおいて再度お試しください。</div>`;
     return;
@@ -209,6 +292,7 @@ async function renderHome(app){
       badge = `<span class="badge ended">終了</span>`;
       btn = `<button class="btn ended" disabled>開催終了</button>`;
     }
+    const appliedHtml = appliedBadgeHtml(appliedMap[ev.id]);
     return `<div class="card">
       <div>${badge}</div>
       <div class="event-row">
@@ -216,6 +300,7 @@ async function renderHome(app){
           <div class="event-date">${fmtDateJp(ev.event_date, ev.is_holiday)} ${hm(ev.start_time)}〜${hm(ev.end_time)}</div>
           <div class="event-meta">📍 ${esc(ev.venue_name)}</div>
           <div class="event-meta">👥 参加状況：${ev.confirmed_count} / ${ev.capacity}</div>
+          ${appliedHtml}
         </div>
         <div>${btn}</div>
       </div>
@@ -297,10 +382,20 @@ async function renderEventPage(app, id, type, errorMsg){
       <input type="text" name="nickname" required maxlength="40" placeholder="例）ひなた">
       <button type="submit" class="btn ${btnClass} wide">${btnLabel}</button>
     </form>
+    ${lineLinkBoxHtml()}
     <div class="small-note" style="${dupHintVisible ? "" : "display:none;"}">この端末では、この開催日にすでにお申し込み済みの可能性があります。心当たりがない場合はそのままお申し込みください。</div>
   </div>
   <a class="back-link" href="#/">← ホームへ戻る</a>
   `;
+
+  const lineLoginBtn = document.getElementById("lineLoginBtn");
+  if (lineLoginBtn) {
+    lineLoginBtn.addEventListener("click", () => {
+      try {
+        if (window.liff && liffReady) liff.login({ redirectUri: location.href });
+      } catch (e) { console.warn("LIFF login failed", e); }
+    });
+  }
 
   document.getElementById("entryForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -311,7 +406,7 @@ async function renderEventPage(app, id, type, errorMsg){
     const nickname = form.nickname.value;
     const line_name = form.line_name.value;
     const { ok, data } = await rpc("submit_entry", {
-      p_event_id: id, p_type: type, p_nickname: nickname, p_line_name: line_name,
+      p_event_id: id, p_type: type, p_nickname: nickname, p_line_name: line_name, p_line_user_id: lineUserId,
     });
     if (ok && data && data.ok === true) {
       try { localStorage.setItem("tnt_applied_" + id, "1"); } catch (err) {}
@@ -338,6 +433,7 @@ async function route(){
   const r = parseHash();
   const app = document.getElementById("app");
   app.innerHTML = `<div class="card center">読み込み中...</div>`;
+  await liffInitPromise;
   if (r.view === "event") {
     await renderEventPage(app, r.id, r.type, null);
   } else {
