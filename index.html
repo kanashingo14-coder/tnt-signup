@@ -318,7 +318,6 @@ async function renderHome(app){
         <div class="event-info">
           <div class="event-date">${fmtDateJp(ev.event_date, ev.is_holiday)} ${hm(ev.start_time)}〜${hm(ev.end_time)}</div>
           <div class="event-meta">📍 ${esc(ev.venue_name)}</div>
-          <div class="event-meta">👥 参加状況：${ev.confirmed_count} / ${ev.capacity}</div>
           ${appliedHtml}
         </div>
         <div>${btn}</div>
@@ -407,7 +406,6 @@ async function renderEventPage(app, id, type, errorMsg){
   app.innerHTML = `
   <div class="card">
     <h2 class="section-title" style="margin-top:0;">${isWaitlist ? "キャンセル待ち申し込み" : "参加申し込み"}</h2>
-    <div class="event-meta" style="margin-bottom:10px;">👥 参加状況：${ev.confirmed_count} / ${ev.capacity}</div>
     ${detailText}
     ${emphasis}
     ${errorHtml}
