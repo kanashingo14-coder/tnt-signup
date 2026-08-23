@@ -146,19 +146,20 @@ async function initLiff(){
 }
 const liffInitPromise = initLiff();
 
-function recommendLoginScreenHtml(){
+function requireLoginScreenHtml(sdkFailed){
+  if (sdkFailed) {
+    return `<div class="card center" style="margin:16px 0;">
+      <div style="font-size:32px;">🔔</div>
+      <p style="font-weight:700;margin:10px 0 4px;">LINEログインの読み込みに失敗しました</p>
+      <p class="small-note" style="margin-top:2px;">お手数ですが、時間をおいて再読み込みいただくか、公式LINEまでご連絡ください</p>
+      <a href="${LINE_URL}" target="_blank" rel="noopener" class="btn wide" style="margin-top:14px;background:#eee9e4;color:var(--text);">公式LINEに連絡する</a>
+    </div>`;
+  }
   return `<div class="card center" style="margin:16px 0;">
     <div style="font-size:32px;">🔔</div>
-    <p style="font-weight:700;margin:10px 0 4px;">LINEでログインすると、開催前日の自動リマインドが届き、<br>ホーム画面で自分の申込み状況も確認できます</p>
-    <p class="small-note" style="margin-top:2px;">ログインしなくても申し込みは可能です</p>
+    <p style="font-weight:700;margin:10px 0 4px;">参加申し込みにはLINEログインが必要です</p>
+    <p class="small-note" style="margin-top:2px;">ログインすると、開催前日の自動リマインドが届き、ホーム画面で自分の申込み状況も確認できます</p>
     <button type="button" id="lineLoginBtn" class="btn open wide" style="margin-top:14px;">LINEでログインする</button>
-    <button type="button" id="skipLoginBtn" class="btn wide" style="margin-top:10px;background:#eee9e4;color:var(--text);">ログインせずに申し込む</button>
-  </div>`;
-}
-
-function skippedLoginNoticeHtml(){
-  return `<div class="line-link-box pending">🔔 LINEでログインすると、開催前日の自動リマインドが届き、申込み状況も確認できます（任意）<br>
-    <button type="button" id="lineLoginBtn" class="line-link-btn">LINEでログインする</button>
   </div>`;
 }
 
@@ -354,7 +355,7 @@ async function renderHome(app){
   `;
 }
 
-async function renderEventPage(app, id, type, errorMsg, skipLogin){
+async function renderEventPage(app, id, type, errorMsg){
   if (!id || (type !== "signup" && type !== "waitlist")) {
     app.innerHTML = `<div class="card">不正なリクエストです。<a class="back-link" href="#/">ホームへ戻る</a></div>`;
     return;
@@ -398,13 +399,9 @@ async function renderEventPage(app, id, type, errorMsg, skipLogin){
   let formSectionHtml;
   if (lineUserId) {
     formSectionHtml = formHtml + `<div class="line-link-box">✅ LINE連携済み：開催前日の自動リマインド・申込み状況の確認ができます</div>`;
-  } else if (!liffReady) {
-    // LIFFが使えない環境（読み込み失敗等）では、これまで通り自由記述のみで申込みできるようにする
-    formSectionHtml = formHtml;
-  } else if (skipLogin) {
-    formSectionHtml = formHtml + skippedLoginNoticeHtml();
   } else {
-    formSectionHtml = recommendLoginScreenHtml();
+    // LINEログインが必須。未ログインの場合はフォーム自体を表示せず、ログインを促す。
+    formSectionHtml = requireLoginScreenHtml(!liffReady);
   }
 
   app.innerHTML = `
@@ -428,13 +425,6 @@ async function renderEventPage(app, id, type, errorMsg, skipLogin){
       } catch (e) { console.warn("LIFF login failed", e); }
     });
   }
-  const skipLoginBtn = document.getElementById("skipLoginBtn");
-  if (skipLoginBtn) {
-    skipLoginBtn.addEventListener("click", () => {
-      renderEventPage(app, id, type, null, true);
-    });
-  }
-
   const entryForm = document.getElementById("entryForm");
   if (entryForm) {
     entryForm.addEventListener("submit", async (e) => {
