@@ -101,6 +101,9 @@
   .applied-badge.signup{background:#eefaf1;color:#1a8f4f;}
   .applied-badge.waitlist{background:var(--waitlist-soft);color:var(--waitlist-dark);}
   .applied-badge.maybe{background:#eee9e4;color:var(--ended-text);}
+  .applied-badge.cancelled{background:#eee9e4;color:var(--ended-text);}
+  .btn.danger{background:#c0392b;color:#fff;}
+  .btn.neutral{background:#eee9e4;color:var(--text);}
 </style>
 </head>
 <body>
@@ -221,7 +224,7 @@ function eventDetailText(ev, gatherTime){
     <ul>
       <li>参加者同士の執拗な連絡先交換、他サークル・別イベント等のお誘いは、全員が安心して楽しんでいただくためご遠慮ください🙏✨　発覚した場合、強制退会等の対応を実施させていただきます。</li>
       <li>当日キャンセル、無断欠席のないようご協力お願いします🥺（キャンセル待ちで参加できない方がいます）。どちらも原則キャンセル料をお願いしています🙇‍♀</li>
-      <li>参加できなくなった場合は、公式LINE宛てにキャンセルのご連絡をお願いします❣</li>
+      <li>参加できなくなった場合は、このページの申込み画面（ホーム画面の「申込み済み」表示から開けます）にある「キャンセル」ボタンからお手続きください❣</li>
     </ul>
   </div>`;
 }
@@ -262,13 +265,20 @@ async function getAppliedTypeMap(){
     const { ok, data } = await rpc("get_my_entries", { p_line_user_id: lineUserId });
     if (ok && Array.isArray(data)) {
       const serverMap = {};
-      data.forEach(row => { serverMap[row.event_id] = row.type; });
+      data.forEach(row => {
+        // 同じ開催日に「キャンセル済み」と「有効な申込み（signup/waitlist）」が両方ある場合は、
+        // 有効な申込みの方を優先して表示する。
+        if (!(row.event_id in serverMap) || row.type !== "cancelled") {
+          serverMap[row.event_id] = row.type;
+        }
+      });
       setMyEntriesMap(serverMap); // 次回LINE未連携時のフォールバック用にも保存
       Object.assign(map, serverMap);
     }
   }
   const localMap = getMyEntriesMap();
   Object.keys(localMap).forEach(id => { if (!(id in map)) map[id] = "maybe"; });
+  // ↑localStorageフォールバックは「maybe」のみ扱い。サーバー側の実データ（signup/waitlist/cancelled）を優先する。
   // localStorageの申込フラグ（申込直後にこの端末で立てたもの）も拾う
   try {
     for (let i = 0; i < localStorage.length; i++) {
@@ -285,6 +295,7 @@ async function getAppliedTypeMap(){
 function appliedBadgeHtml(type){
   if (type === "signup") return `<div class="applied-badge signup">✅ 申込済み</div>`;
   if (type === "waitlist") return `<div class="applied-badge waitlist">⏳ キャンセル待ち中</div>`;
+  if (type === "cancelled") return `<div class="applied-badge cancelled">🚫 キャンセル済み</div>`;
   if (type === "maybe") return `<div class="applied-badge maybe">✅ 申込済みの可能性があります（この端末）</div>`;
   return "";
 }
@@ -341,7 +352,7 @@ async function renderHome(app){
   <div class="card faq">
     <dl>
       <dt>Q. キャンセルしたいときは？</dt>
-      <dd>A. お手数ですが、必ず公式LINEまでご連絡ください。このページからのキャンセル手続きはできません。</dd>
+      <dd>A. ホーム画面の「申込み済み」「キャンセル待ち中」表示から該当の開催日ページを開き、「キャンセル」ボタンからお手続きください。公式LINEへのご連絡は不要です。</dd>
       <dt>Q. 当日遅刻しそうなときは？</dt>
       <dd>A. 分かった時点で公式LINEまでご連絡をお願いします。</dd>
       <dt>Q. 友達を誘って一緒に参加したい場合は？</dt>
@@ -386,6 +397,16 @@ async function renderEventPage(app, id, type, errorMsg){
   let dupHintVisible = false;
   try { dupHintVisible = !!localStorage.getItem("tnt_applied_" + id); } catch (e) {}
 
+  // LINE連携済みの場合、この開催日について自分の申込み（キャンセル済みでないもの）があるかを確認する。
+  // あれば「キャンセル」導線を表示し、申込みフォームは表示しない（二重申込み防止）。
+  let myEntry = null;
+  if (lineUserId) {
+    const { ok: okEntries, data: entries } = await rpc("get_my_entries", { p_line_user_id: lineUserId });
+    if (okEntries && Array.isArray(entries)) {
+      myEntry = entries.find(en => en.event_id === id && en.type !== "cancelled") || null;
+    }
+  }
+
   const formHtml = `
     <form id="entryForm">
       <label>①オープンチャット登録名</label>
@@ -396,11 +417,18 @@ async function renderEventPage(app, id, type, errorMsg){
     </form>`;
 
   let formSectionHtml;
-  if (lineUserId) {
-    formSectionHtml = formHtml + `<div class="line-link-box">✅ LINE連携済み：開催前日の自動リマインド・申込み状況の確認ができます</div>`;
-  } else {
+  if (!lineUserId) {
     // LINEログインが必須。未ログインの場合はフォーム自体を表示せず、ログインを促す。
     formSectionHtml = requireLoginScreenHtml(!liffReady);
+  } else if (myEntry) {
+    const statusLabel = myEntry.type === "waitlist" ? "⏳ キャンセル待ち中です" : "✅ 参加申込み済みです";
+    formSectionHtml = `
+      <div class="line-link-box">${statusLabel}：この開催日はすでにお申し込みいただいています</div>
+      <div id="cancelSection">
+        <button type="button" id="showCancelBtn" class="btn neutral wide">参加できなくなった場合はこちら（キャンセル）</button>
+      </div>`;
+  } else {
+    formSectionHtml = formHtml + `<div class="line-link-box">✅ LINE連携済み：開催前日の自動リマインド・申込み状況の確認ができます</div>`;
   }
 
   app.innerHTML = `
@@ -445,6 +473,33 @@ async function renderEventPage(app, id, type, errorMsg){
       }
     });
   }
+  const showCancelBtn = document.getElementById("showCancelBtn");
+  if (showCancelBtn && myEntry) {
+    showCancelBtn.addEventListener("click", () => {
+      const section = document.getElementById("cancelSection");
+      section.innerHTML = `
+        <div class="caution-box" style="margin-top:12px;">
+          <p style="margin:0 0 14px;font-weight:700;color:var(--text);">本当にキャンセルしますか？</p>
+          <button type="button" id="cancelYesBtn" class="btn danger wide">はい、キャンセルする</button>
+          <button type="button" id="cancelNoBtn" class="btn neutral wide">やめる</button>
+        </div>`;
+      document.getElementById("cancelNoBtn").addEventListener("click", () => {
+        renderEventPage(app, id, type, null);
+      });
+      document.getElementById("cancelYesBtn").addEventListener("click", async (ev2) => {
+        const btn = ev2.currentTarget;
+        btn.disabled = true;
+        btn.textContent = "処理中...";
+        const { ok, data } = await rpc("cancel_entry", { p_signup_id: myEntry.id, p_line_user_id: lineUserId });
+        if (ok && data && data.ok === true) {
+          renderCancelled(app);
+        } else {
+          const msg = (data && data.error) || "エラーが発生しました。時間をおいて再度お試しください。";
+          renderEventPage(app, id, type, msg);
+        }
+      });
+    });
+  }
 }
 
 function renderDone(app){
@@ -454,6 +509,17 @@ function renderDone(app){
     <div style="font-size:18px;font-weight:800;">申し込み完了しました☑</div>
     <p style="color:var(--muted);font-size:13.5px;margin-top:10px;">ご登録ありがとうございます。当日は体育館でお待ちしております🏐</p>
     <a class="btn open wide" href="#/" style="margin-top:18px;">戻る</a>
+  </div>
+  `;
+}
+
+function renderCancelled(app){
+  app.innerHTML = `
+  <div class="card center">
+    <div class="done-icon">🚫</div>
+    <div style="font-size:18px;font-weight:800;">キャンセルを受け付けました</div>
+    <p style="color:var(--muted);font-size:13.5px;margin-top:10px;">またのご参加をお待ちしております🏐</p>
+    <a class="btn open wide" href="#/" style="margin-top:18px;">ホームへ戻る</a>
   </div>
   `;
 }
