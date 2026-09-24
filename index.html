@@ -66,7 +66,7 @@
   .btn.open{background:linear-gradient(135deg,#ff9a5c,var(--orange));color:#fff;box-shadow:0 4px 10px rgba(255,122,61,.35);}
   .btn.waitlist{background:linear-gradient(135deg,#f0bb64,var(--waitlist));color:#fff;box-shadow:0 4px 10px rgba(232,163,61,.35);}
   .btn.ended{background:var(--ended);color:var(--ended-text);cursor:not-allowed;}
-  .btn.wide{display:block;width:100%;padding:14px;font-size:15px;margin-top:8px;}
+  .btn.wide{display:block;width:100%;padding:14px;font-size:15px;margin-top:8px;white-space:normal;line-height:1.4;}
   .detail-box{background:#fffaf4;border:1px solid #f0c896;border-radius:14px;padding:18px 20px;margin:16px 0;}
   .detail-heading{font-size:15px;font-weight:800;color:var(--orange-dark);margin:0 0 12px;}
   .detail-list{margin:0;}
@@ -321,6 +321,12 @@ async function renderHome(app){
     } else {
       badge = `<span class="badge ended">終了</span>`;
       btn = `<button class="btn ended" disabled>開催終了</button>`;
+    }
+    // すでにこの開催日に有効な申込み（参加／キャンセル待ちいずれか）がある場合は、
+    // 開催ステータスに関わらずボタンをグレーアウトして二重申込みを防ぐ。
+    const myStatus = appliedMap[ev.id];
+    if (ev.status !== "ended" && (myStatus === "signup" || myStatus === "waitlist")) {
+      btn = `<button class="btn ended" disabled>申込み済み</button>`;
     }
     const appliedHtml = appliedBadgeHtml(appliedMap[ev.id]);
     return `<div class="card">
