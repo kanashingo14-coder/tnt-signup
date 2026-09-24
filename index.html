@@ -102,6 +102,8 @@
   .applied-badge.waitlist{background:var(--waitlist-soft);color:var(--waitlist-dark);}
   .applied-badge.maybe{background:#eee9e4;color:var(--ended-text);}
   .applied-badge.cancelled{background:#eee9e4;color:var(--ended-text);}
+  .applied-badge.entry{background:#fbe8c8;color:var(--waitlist-dark);}
+  .applied-badge.not_selected{background:#eee9e4;color:var(--ended-text);}
   .btn.danger{background:#c0392b;color:#fff;}
   .btn.neutral{background:#eee9e4;color:var(--text);}
 </style>
@@ -296,6 +298,8 @@ function appliedBadgeHtml(type){
   if (type === "signup") return `<div class="applied-badge signup">✅ 申込済み</div>`;
   if (type === "waitlist") return `<div class="applied-badge waitlist">⏳ キャンセル待ち中</div>`;
   if (type === "cancelled") return `<div class="applied-badge cancelled">🚫 キャンセル済み</div>`;
+  if (type === "entry") return `<div class="applied-badge entry">🎲 抽選エントリー中</div>`;
+  if (type === "not_selected") return `<div class="applied-badge not_selected">😢 非選出</div>`;
   if (type === "maybe") return `<div class="applied-badge maybe">✅ 申込済みの可能性があります（この端末）</div>`;
   return "";
 }
@@ -318,14 +322,23 @@ async function renderHome(app){
     } else if (ev.status === "waitlist") {
       badge = `<span class="badge waitlist">キャンセル待ち</span>`;
       btn = `<a class="btn waitlist" href="#/event?id=${ev.id}&type=waitlist">キャンセル待ち申し込み</a>`;
+    } else if (ev.status === "before_accept") {
+      badge = `<span class="badge ended">受付開始前</span>`;
+      btn = `<button class="btn ended" disabled>${fmtDateJp(ev.accept_start_date, false)}〜受付開始</button>`;
+    } else if (ev.status === "accepting") {
+      badge = `<span class="badge open">抽選受付中</span>`;
+      btn = `<a class="btn open" href="#/event?id=${ev.id}&type=entry">応募する</a>`;
+    } else if (ev.status === "selecting") {
+      badge = `<span class="badge waitlist">結果発表待ち</span>`;
+      btn = `<button class="btn ended" disabled>受付終了</button>`;
     } else {
       badge = `<span class="badge ended">終了</span>`;
       btn = `<button class="btn ended" disabled>開催終了</button>`;
     }
-    // すでにこの開催日に有効な申込み（参加／キャンセル待ちいずれか）がある場合は、
+    // すでにこの開催日に有効な申込み（参加／キャンセル待ち／抽選エントリーいずれか）がある場合は、
     // 開催ステータスに関わらずボタンをグレーアウトして二重申込みを防ぐ。
     const myStatus = appliedMap[ev.id];
-    if (ev.status !== "ended" && (myStatus === "signup" || myStatus === "waitlist")) {
+    if (ev.status !== "ended" && (myStatus === "signup" || myStatus === "waitlist" || myStatus === "entry")) {
       btn = `<button class="btn ended" disabled>申込み済み</button>`;
     }
     const appliedHtml = appliedBadgeHtml(appliedMap[ev.id]);
@@ -372,7 +385,7 @@ async function renderHome(app){
 }
 
 async function renderEventPage(app, id, type, errorMsg){
-  if (!id || (type !== "signup" && type !== "waitlist")) {
+  if (!id || (type !== "signup" && type !== "waitlist" && type !== "entry")) {
     app.innerHTML = `<div class="card">不正なリクエストです。<a class="back-link" href="#/">ホームへ戻る</a></div>`;
     return;
   }
@@ -385,6 +398,36 @@ async function renderEventPage(app, id, type, errorMsg){
     app.innerHTML = `<div class="card center">この開催日はすでに終了しています。<a class="back-link" href="#/">ホームへ戻る</a></div>`;
     return;
   }
+
+  const isLottery = !!(ev.accept_start_date && ev.accept_end_date);
+  if (isLottery && type !== "entry") {
+    app.innerHTML = `<div class="card center">この開催日は抽選制です。<br><a class="btn open" style="margin-top:14px;display:inline-block;" href="#/event?id=${id}&type=entry">抽選応募へ</a></div>`;
+    return;
+  }
+  if (!isLottery && type === "entry") {
+    app.innerHTML = `<div class="card">不正なリクエストです。<a class="back-link" href="#/">ホームへ戻る</a></div>`;
+    return;
+  }
+
+  // LINE連携済みの場合、この開催日について自分の申込み（キャンセル済みでないもの）があるかを確認する。
+  // あれば「キャンセル」導線または結果表示を出し、申込みフォームは表示しない（二重申込み防止）。
+  let myEntry = null;
+  if (lineUserId) {
+    const { ok: okEntries, data: entries } = await rpc("get_my_entries", { p_line_user_id: lineUserId });
+    if (okEntries && Array.isArray(entries)) {
+      myEntry = entries.find(en => en.event_id === id && en.type !== "cancelled") || null;
+    }
+  }
+
+  if (isLottery && ev.status === "before_accept") {
+    app.innerHTML = `<div class="card center">受付開始前です（${fmtDateJp(ev.accept_start_date, false)}から受付開始予定です）。<a class="back-link" href="#/">ホームへ戻る</a></div>`;
+    return;
+  }
+  if (isLottery && ev.status === "selecting" && !myEntry) {
+    app.innerHTML = `<div class="card center">受付は終了しました。結果発表をお待ちください。<a class="back-link" href="#/">ホームへ戻る</a></div>`;
+    return;
+  }
+
   if (type === "signup" && ev.status === "waitlist") {
     app.innerHTML = `<div class="card center">この開催日は定員に達しました。<br><a class="btn waitlist" style="margin-top:14px;display:inline-block;" href="#/event?id=${id}&type=waitlist">キャンセル待ち申し込みへ</a></div>`;
     return;
@@ -393,25 +436,18 @@ async function renderEventPage(app, id, type, errorMsg){
   const gatherTime = type === "signup" ? hm(ev.gather_time) : subtractMinutes(ev.start_time, 10);
   const detailText = eventDetailText(ev, gatherTime);
   const isWaitlist = type === "waitlist";
-  const btnLabel = isWaitlist ? "キャンセル待ち申し込み" : "参加申し込み";
+  const isEntry = type === "entry";
+  const btnLabel = isWaitlist ? "キャンセル待ち申し込み" : isEntry ? "抽選に応募する" : "参加申し込み";
   const btnClass = isWaitlist ? "waitlist" : "open";
   const emphasis = isWaitlist
     ? `<div class="emphasis">キャンセル待ちから参加確定へ繰り上げる場合は、開催前日までに公式LINEからご連絡いたします。</div>`
+    : isEntry
+    ? `<div class="emphasis">応募多数の場合は抽選となります。結果は幹事が確認のうえ、当選者にのみ公式LINEでご連絡します（落選者への個別連絡はありません。結果はこのサイトでご確認いただけます）。</div>`
     : "";
   const errorHtml = errorMsg ? `<div class="error-box">${esc(errorMsg)}</div>` : "";
 
   let dupHintVisible = false;
   try { dupHintVisible = !!localStorage.getItem("tnt_applied_" + id); } catch (e) {}
-
-  // LINE連携済みの場合、この開催日について自分の申込み（キャンセル済みでないもの）があるかを確認する。
-  // あれば「キャンセル」導線を表示し、申込みフォームは表示しない（二重申込み防止）。
-  let myEntry = null;
-  if (lineUserId) {
-    const { ok: okEntries, data: entries } = await rpc("get_my_entries", { p_line_user_id: lineUserId });
-    if (okEntries && Array.isArray(entries)) {
-      myEntry = entries.find(en => en.event_id === id && en.type !== "cancelled") || null;
-    }
-  }
 
   const formHtml = `
     <form id="entryForm">
@@ -427,19 +463,26 @@ async function renderEventPage(app, id, type, errorMsg){
     // LINEログインが必須。未ログインの場合はフォーム自体を表示せず、ログインを促す。
     formSectionHtml = requireLoginScreenHtml(!liffReady);
   } else if (myEntry) {
-    const statusLabel = myEntry.type === "waitlist" ? "⏳ キャンセル待ち中です" : "✅ 参加申込み済みです";
-    formSectionHtml = `
-      <div class="line-link-box">${statusLabel}：この開催日はすでにお申し込みいただいています</div>
-      <div id="cancelSection">
+    let statusLabel;
+    if (myEntry.type === "waitlist") statusLabel = "⏳ キャンセル待ち中です";
+    else if (myEntry.type === "entry") statusLabel = "🎲 抽選エントリー済みです：結果発表をお待ちください";
+    else if (myEntry.type === "not_selected") statusLabel = "😢 今回は非選出でした：またのご応募をお待ちしております";
+    else statusLabel = "✅ 参加申込み済みです";
+    const cancelHtml = myEntry.type !== "not_selected"
+      ? `<div id="cancelSection">
         <button type="button" id="showCancelBtn" class="btn neutral wide">参加できなくなった場合はこちら（キャンセル）</button>
-      </div>`;
+      </div>`
+      : "";
+    formSectionHtml = `
+      <div class="line-link-box">${statusLabel}</div>
+      ${cancelHtml}`;
   } else {
     formSectionHtml = formHtml + `<div class="line-link-box">✅ LINE連携済み：開催前日の自動リマインド・申込み状況の確認ができます</div>`;
   }
 
   app.innerHTML = `
   <div class="card">
-    <h2 class="section-title" style="margin-top:0;">${isWaitlist ? "キャンセル待ち申し込み" : "参加申し込み"}</h2>
+    <h2 class="section-title" style="margin-top:0;">${isWaitlist ? "キャンセル待ち申し込み" : isEntry ? "抽選応募" : "参加申し込み"}</h2>
     ${detailText}
     ${emphasis}
     ${errorHtml}
