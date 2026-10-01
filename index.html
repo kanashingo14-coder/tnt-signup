@@ -338,11 +338,17 @@ async function renderHome(app){
     // すでにこの開催日に有効な申込み（参加／キャンセル待ち／抽選エントリーいずれか）がある場合は、
     // 開催ステータスに関わらずボタンをグレーアウトして二重申込みを防ぐ。
     const myStatus = appliedMap[ev.id];
+    const isLotteryEvent = !!(ev.accept_start_date && ev.accept_end_date);
     // 抽選で非選出だった人は、結果発表後もその開催日についてキャンセル待ちに登録できるようにする。
     if (ev.status === "selecting" && myStatus === "not_selected") {
       btn = `<a class="btn waitlist" href="#/event?id=${ev.id}&type=waitlist">キャンセル待ちに登録する</a>`;
     } else if (ev.status !== "ended" && (myStatus === "signup" || myStatus === "waitlist" || myStatus === "entry")) {
-      btn = `<button class="btn ended" disabled>申込み済み</button>`;
+      // 「申込み済み」表示は二重申込み防止のためグレーアウトするが、ここを押せなくすると
+      // 申込み済みの本人が開催日ページ（キャンセルボタンのある画面）に辿り着く手段が無くなってしまうため、
+      // 見た目はグレーのままクリック可能なリンクにする（抽選当選者はtype=entryでアクセスすることで
+      // 自分の当選状況・キャンセルボタンが表示される画面に遷移する）。
+      const linkType = (myStatus === "signup" && isLotteryEvent) ? "entry" : myStatus;
+      btn = `<a class="btn ended" style="cursor:pointer;" href="#/event?id=${ev.id}&type=${linkType}">申込み済み</a>`;
     }
     const appliedHtml = appliedBadgeHtml(appliedMap[ev.id]);
     return `<div class="card">
