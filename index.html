@@ -333,7 +333,7 @@ async function renderHome(app){
       badge = `<span class="badge waitlist">抽選結果 選考中</span>`;
       btn = `<button class="btn ended" disabled>選考中</button>`;
     } else if (ev.status === "selecting") {
-      badge = `<span class="badge waitlist">結果発表</span>`;
+      badge = `<span class="badge waitlist">抽選期間中</span>`;
       btn = `<button class="btn ended" disabled>受付終了</button>`;
     } else {
       badge = `<span class="badge ended">終了</span>`;
